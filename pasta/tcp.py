@@ -1,62 +1,109 @@
-from pasta.logger import Logger
-from pasta.prompt import Prompter
-from pasta.storage import BufferStorage, Processor
 from pasta.cli_config import config
 from selectors import DefaultSelector, EVENT_READ, EVENT_WRITE
-from typing import Any
 import socket
 
 
-class TCPClient(Processor):
-    def __init__(self, fd: socket.socket, storage: BufferStorage, logger: Logger):
-        self.fd = fd
-        self.storage = storage
-        self.logger = logger
-        self.prompt = Prompter()
-        super().__init__(self.prompt, self.storage, self.logger)
-
-
-class TCPServer:
+class Server:
     def __init__(self):
-        self.logger = Logger()
-        self.storage = BufferStorage()
-        self.mapping = dict[socket.socket, TCPClient]()
-        self.server = socket.create_server(
+        self.select = DefaultSelector()
+        self.fd = socket.create_server(
             address=("localhost", config.port),
             family=socket.AF_INET,
             backlog=socket.SOMAXCONN,
             reuse_port=True,
         )
 
-        self.server.setblocking(False)
-        self.select = DefaultSelector()
-        self.select.register(self.server, EVENT_READ, default_accepter)
+        self.fd.setblocking(False)
+        self.select.register(self.fd, EVENT_READ, accept)
+        self.mapping = dict[socket.socket, Client]()
 
-        if config.log_path:
-            self.is_logging_enabled = True
+    def run(self):
+        while True:
+            pairs = self.select.select(config.timeout)
+            for key, _ in pairs:
+                fd = key.fileobj
+                data = key.data
+
+                assert isinstance(fd, socket.socket)
+                if fd == self.fd:
+                    data(self)
+                else:
+                    data(self, self.mapping[fd])
+
+    def close(self):
+        self.fd.close()
+        self.select.close()
+
+
+class Client:
+    BUFSIZ: int = 1024
+
+    def __init__(self, fd: socket.socket, context: Server):
+        self.fd = fd
+        self.context = context
+        self.prompt_ready = True
+        self.buffer = b""
+        self.is_full = False
+
+    def recv_all(self):
+        fd = self.fd
+        context = self.context
+
+        try:
+            buffer = fd.recv(self.BUFSIZ)
+        except BlockingIOError:
+            return
+
+        if len(buffer) == 1:
+            self.is_full = True
+        elif not buffer:
+            context.select.unregister(fd)
+            fd.shutdown(socket.SHUT_RDWR)
+            fd.close()
+            self.is_full = True
         else:
-            self.is_logging_enabled = False
+            self.buffer += buffer
 
-    def register(self, fd: socket.socket, event: int, data: Any):
-        self.select.register(fd, event, data)
-        self.mapping[fd] = TCPClient(fd, self.storage, self.logger)
-
-    def unregister(self, fd: socket.socket):
-        self.select.unregister(fd)
-        if fd in self.mapping:
-            del self.mapping[fd]
+    def process(self):
+        pass
 
 
-def client_activity(server: TCPServer, client: TCPClient):
-    pass
+def client_activity(server: Server, client: Client):
+    fd = client.fd
+    if client.prompt_ready:
+        try:
+            prompt = bytes(config.prompt, "utf-8")
+            fd.send(prompt)
+        except BlockingIOError:
+            return
+        client.prompt_ready = False
 
+    client.recv_all()
+    if not client.is_full:
+        return
 
-def default_accepter(server: TCPServer) -> bool:
     try:
-        client, _ = server.server.accept()
+        fd.send(client.buffer)
     except BlockingIOError:
-        return False
+        return
+    except OSError as os_err:
+        # WARN: Maybe a POSIX-only behavior
+        # It trying to write data on a closed socket
+        # [Errno 9]: Bad file descriptor
+        if os_err.errno == 9:
+            return
+
+    client.buffer = b""
+    client.prompt_ready = True
+    client.is_full = False
+
+
+def accept(server: Server):
+    try:
+        client, _ = server.fd.accept()
+    except BlockingIOError:
+        return
 
     client.setblocking(False)
-    server.register(client, EVENT_READ | EVENT_WRITE, None)
-    return True
+    server.select.register(client, EVENT_READ | EVENT_WRITE, client_activity)
+    server.mapping[client] = Client(client, server)

@@ -1,7 +1,30 @@
 #!/usr/bin/env python3.13
 from pasta.stdin import Stdin
 from pasta.cli_config import config, Mode
+from pasta.tcp import Server
 import sys
+
+
+def get_errno(errno: OSError) -> tuple[int, str]:
+    code = errno.errno if errno.errno is not None else 1
+    errmsg = errno.strerror if errno.strerror is not None else f"OSError: {code}"
+    return (code, errmsg)
+
+
+def tcp_mode() -> int:
+    tcp = Server()
+    try:
+        tcp.run()
+    except KeyboardInterrupt:
+        tcp.close()
+        return 0
+    # except OSError as os_err:
+    #     code, errmsg = get_errno(os_err)
+    #     print(errmsg, file=sys.stderr)
+    #     return code
+
+    tcp.close()
+    return 0
 
 
 def stdin_mode() -> int:
@@ -13,12 +36,9 @@ def stdin_mode() -> int:
         stdin.close(config.log_path)
         return 0
     except OSError as os_err:
-        errno = os_err.errno if os_err.errno is not None else 1
-        strerror = (
-            os_err.strerror if os_err.strerror is not None else f"OSError: {errno}"
-        )
-        print(strerror, file=sys.stderr)
-        return errno
+        code, errmsg = get_errno(os_err)
+        print(errmsg, file=sys.stderr)
+        return code
 
     stdin.close(config.log_path)
     return 0
@@ -30,7 +50,7 @@ def main() -> int:
             return stdin_mode()
 
         case Mode.TCP:
-            return 0
+            return tcp_mode()
 
     return 0
 

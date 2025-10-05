@@ -1,13 +1,25 @@
+from pasta.cli_config import config
 from _io import TextIOWrapper
 from typing import TextIO
 from socket import socket as Socket
+from enum import Enum
 import os
 import sys
 
 
+class Signal(Enum):
+    SUCCESS = 0
+    WOULDBLOCK = 1
+    CONNRESET = 2
+    EOF = 3
+    NOTWRITTEN = 4
+
+
 class Prompter:
     def __init__(
-        self, writer: TextIO | TextIOWrapper | Socket = sys.stdout, prompt: str = ">>> "
+        self,
+        writer: TextIO | TextIOWrapper | Socket = sys.stdout,
+        prompt: str = config.prompt,
     ):
         if isinstance(writer, TextIOWrapper):
             if not writer.writable:
@@ -33,18 +45,25 @@ class Prompter:
         self.prompt = prompt
         self.is_prompt_ready = True
 
-    def write(self, msg: str, flush: bool = False):
+    def write(self, msg: str, flush: bool = False) -> Signal:
         byted = bytes(msg, "utf-8")
         if self.is_socket:
             try:
-                self.socket_writer.send(byted)
+                sended = self.socket_writer.send(byted)
                 if os.name == "posix":
                     os.fsync(self.socket_writer) if flush else None
 
             except BlockingIOError:
-                return
+                return Signal.WOULDBLOCK
+            except ConnectionResetError:
+                return Signal.CONNRESET
 
-            return
+            if not sended:
+                return Signal.CONNRESET
+            elif sended == 1:
+                return Signal.EOF
+
+            return Signal.SUCCESS
 
         if self.is_wrapper:
             self.wrap_writer.write(msg)
@@ -53,7 +72,12 @@ class Prompter:
             self.text_writer.write(msg)
             self.text_writer.flush() if flush else None
 
-    def write_prompt(self):
+        return Signal.SUCCESS
+
+    def write_prompt(self) -> Signal:
         if self.is_prompt_ready:
-            self.write(self.prompt, flush=True)
+            result = self.write(self.prompt, flush=True)
             self.is_prompt_ready = False
+            return result
+
+        return Signal.NOTWRITTEN
