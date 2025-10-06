@@ -1,10 +1,15 @@
+from pasta.logger import Logger
+from pasta.storage import BufferStorage
 from pasta.cli_config import config
+from pasta import parser
 from selectors import DefaultSelector, EVENT_READ, EVENT_WRITE
 import socket
+import errno
 
 
-class Server:
+class Server(Logger):
     def __init__(self):
+        Logger.__init__(self)
         self.select = DefaultSelector()
         self.fd = socket.create_server(
             address=("localhost", config.port),
@@ -33,39 +38,89 @@ class Server:
     def close(self):
         self.fd.close()
         self.select.close()
+        if config.log_path:
+            self.write_to_file(config.log_path)
 
 
-class Client:
+class Client(BufferStorage):
     BUFSIZ: int = 1024
 
     def __init__(self, fd: socket.socket, context: Server):
+        BufferStorage.__init__(self)
+
         self.fd = fd
         self.context = context
         self.prompt_ready = True
         self.buffer = b""
         self.is_full = False
+        self.is_closed = False
 
-    def recv_all(self):
-        fd = self.fd
-        context = self.context
+    def close(self):
+        if self.fd in self.context.mapping:
+            del self.context.mapping[self.fd]
+
+        self.context.select.unregister(self.fd)
+        self.fd.shutdown(socket.SHUT_RDWR)
+        self.fd.close()
+
+    def try_send(self, data: bytes):
+        if self.is_closed:
+            return
 
         try:
-            buffer = fd.recv(self.BUFSIZ)
+            sended = self.fd.send(data)
+        except BlockingIOError:
+            return
+        except OSError as os_err:
+            if os_err.errno == errno.EBADF:
+                return
+        except ConnectionResetError:
+            sended = 0
+
+        if not sended:
+            self.close()
+            self.is_closed = True
+
+    def recv_all(self):
+        try:
+            buffer = self.fd.recv(self.BUFSIZ)
         except BlockingIOError:
             return
 
         if len(buffer) == 1:
             self.is_full = True
         elif not buffer:
-            context.select.unregister(fd)
-            fd.shutdown(socket.SHUT_RDWR)
-            fd.close()
+            self.close()
+            self.is_closed = True
             self.is_full = True
         else:
             self.buffer += buffer
 
-    def process(self):
-        pass
+    def parse(self) -> bool:
+        try:
+            src = str(self.buffer, "utf-8")
+        except UnicodeDecodeError:
+            self.try_send(b"Input is not a valid UTF-8 Characters")
+            return False
+
+        try:
+            response = parser.active_request_handler(src)
+        except ValueError as err:
+            byted = bytes(err.args[0] + "\n", "utf-8")
+            self.try_send(byted)
+            return False
+
+        try:
+            notif = self.process(response)
+        except BaseException as err:
+            byted = bytes(err.args[0] + "\n", "utf-8")
+            self.try_send(byted)
+            return False
+
+        if notif is not None:
+            self.try_send(bytes(notif + "\n", "utf-8"))
+
+        return True
 
 
 def client_activity(server: Server, client: Client):
@@ -77,21 +132,17 @@ def client_activity(server: Server, client: Client):
         except BlockingIOError:
             return
         client.prompt_ready = False
+        server.select.modify(fd, EVENT_READ, client_activity)
 
     client.recv_all()
     if not client.is_full:
         return
+    else:
+        if not client.is_closed:
+            server.select.modify(fd, EVENT_WRITE, client_activity)
 
-    try:
-        fd.send(client.buffer)
-    except BlockingIOError:
-        return
-    except OSError as os_err:
-        # WARN: Maybe a POSIX-only behavior
-        # It trying to write data on a closed socket
-        # [Errno 9]: Bad file descriptor
-        if os_err.errno == 9:
-            return
+    if client.parse():
+        server.write(str(client.buffer, "utf-8"))
 
     client.buffer = b""
     client.prompt_ready = True
@@ -105,5 +156,5 @@ def accept(server: Server):
         return
 
     client.setblocking(False)
-    server.select.register(client, EVENT_READ | EVENT_WRITE, client_activity)
+    server.select.register(client, EVENT_WRITE, client_activity)
     server.mapping[client] = Client(client, server)

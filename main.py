@@ -18,10 +18,10 @@ def tcp_mode() -> int:
     except KeyboardInterrupt:
         tcp.close()
         return 0
-    # except OSError as os_err:
-    #     code, errmsg = get_errno(os_err)
-    #     print(errmsg, file=sys.stderr)
-    #     return code
+    except OSError as os_err:
+        code, errmsg = get_errno(os_err)
+        print(errmsg, file=sys.stderr)
+        return code
 
     tcp.close()
     return 0

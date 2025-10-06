@@ -17,11 +17,11 @@ class Config:
 
 
 usage = """
-    pasta                    | stdin
-    pasta --tcp --port 8000  | tcp
-    pasta --log log_file.log | stdin with logging
-    pasta --timeout 0.050    | timeout in milisec
-    pasta --prompt '>>> '    | specify the prompt
+    pasta                      | stdin
+    pasta --tcp 1 --port 8000  | tcp nonblock
+    pasta --log log_file.log   | stdin with logging
+    pasta --timeout 0.050      | timeout in milisec
+    pasta --prompt '>>> '      | specify the prompt
 """
 
 config = Config()
