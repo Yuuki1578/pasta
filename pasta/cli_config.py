@@ -17,11 +17,24 @@ class Config:
 
 
 usage = """
-    pasta                      | stdin
-    pasta --tcp 1 --port 8000  | tcp nonblock
-    pasta --log log_file.log   | stdin with logging
-    pasta --timeout 0.050      | timeout in milisec
-    pasta --prompt '>>> '      | specify the prompt
+    pasta                     | stdin
+    pasta --tcp 1 --port 8000 | tcp nonblock
+    pasta --log log_file.log  | stdin with logging
+    pasta --timeout 0.050     | timeout in milisec
+    pasta --prompt '$ '       | specify the prompt
+
+on the console or telnet syntax:
+    <CMD> <IDENT> <TEXT>
+
+where:
+    <CMD> is a predefined valid command
+    <IDENT> is a key to a data text
+    <TEXT> is a data that bounded by <IDENT>
+
+CMD list:
+    SET | set <IDENT> <TEXT>
+    GET | get <IDENT>
+    DEL | del <IDENT>
 """
 
 config = Config()
