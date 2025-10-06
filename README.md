@@ -5,3 +5,5 @@ Currently support only `stdin` (completed), and
 half for `tcp` using telnet.
 
 type `./main.py --help` for further information.
+
+![Pasta Pipeline](./res/pasta_pipeline.jpg)
