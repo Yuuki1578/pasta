@@ -14,6 +14,7 @@ class Config:
         self.port = 3000
         self.prompt = "pasta >>> "
         self.timeout = 0.075
+        self.shared = False
 
 
 usage = """
@@ -47,8 +48,14 @@ args.add_argument(
 )
 
 args.add_argument(
+    "--shared",
+    help="enable shared key between clients (TCP only)",
+    type=bool,
+)
+
+args.add_argument(
     "--log",
-    help="enable loggig on specified file",
+    help="enable logging on specified file",
     type=str,
 )
 
@@ -74,6 +81,9 @@ parsed_args = args.parse_args()
 
 if parsed_args.tcp:
     config.mode = Mode.TCP
+
+if parsed_args.tcp and parsed_args.shared:
+    config.shared = True
 
 if parsed_args.log:
     config.log_path = parsed_args.log

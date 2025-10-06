@@ -17,6 +17,14 @@ class Logger:
         return self.buffer.getvalue()
 
     def write_to_file(self, path: str):
-        file = open(path, "a")
+        try:
+            file = open(path, "a")
+        except (OSError, PermissionError) as err:
+            print(
+                err.strerror + ":" if isinstance(err.strerror, str) else "pasta:",
+                f'Can\'t open file "{path}"',
+            )
+            exit(err.errno if isinstance(err.errno, int) else 1)
+
         file.write(self.getvalue())
         file.close()

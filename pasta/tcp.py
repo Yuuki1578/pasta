@@ -7,9 +7,11 @@ import socket
 import errno
 
 
-class Server(Logger):
+class Server(Logger, BufferStorage):
     def __init__(self):
         Logger.__init__(self)
+        BufferStorage.__init__(self)
+
         self.select = DefaultSelector()
         self.fd = socket.create_server(
             address=("localhost", config.port),
@@ -111,7 +113,11 @@ class Client(BufferStorage):
             return False
 
         try:
-            notif = self.process(response)
+            if config.shared:
+                notif = self.context.process(response)
+            else:
+                notif = self.process(response)
+
         except BaseException as err:
             byted = bytes(err.args[0] + "\n", "utf-8")
             self.try_send(byted)
